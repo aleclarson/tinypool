@@ -123,22 +123,25 @@ function atomicsWaitLoop(port: MessagePort, sharedBuffer: Int32Array) {
   // running, we wait for a signal from the parent thread using Atomics.wait(),
   // and read the message from the port instead of generating an event,
   // in order to avoid that overhead.
-  // The one catch is that this stops asynchronous operations that are still
-  // running from proceeding. Generally, tasks should not spawn asynchronous
-  // operations without waiting for them to finish, though.
-  while (currentTasks === 0) {
-    // Check whether there are new messages by testing whether the current
-    // number of requests posted by the parent thread matches the number of
-    // requests received.
-    Atomics.wait(sharedBuffer, kRequestCountField, lastSeenRequestCount)
-    lastSeenRequestCount = Atomics.load(sharedBuffer, kRequestCountField)
+  if (currentTasks === 0) {
+    // Instead of using a `while` loop, which blocks asynchronous processing,
+    // use a `nextTick` loop instead, so workers can have parallel tasks.
+    process.nextTick(() => {
+      // Check whether there are new messages by testing whether the current
+      // number of requests posted by the parent thread matches the number of
+      // requests received.
+      Atomics.wait(sharedBuffer, kRequestCountField, lastSeenRequestCount)
+      lastSeenRequestCount = Atomics.load(sharedBuffer, kRequestCountField)
 
-    // We have to read messages *after* updating lastSeenRequestCount in order
-    // to avoid race conditions.
-    let entry
-    while ((entry = receiveMessageOnPort(port)) !== undefined) {
-      onMessage(port, sharedBuffer, entry.message)
-    }
+      // We have to read messages *after* updating lastSeenRequestCount in order
+      // to avoid race conditions.
+      let entry
+      while ((entry = receiveMessageOnPort(port)) !== undefined) {
+        onMessage(port, sharedBuffer, entry.message)
+      }
+
+      atomicsWaitLoop(port, sharedBuffer)
+    })
   }
 }
 
